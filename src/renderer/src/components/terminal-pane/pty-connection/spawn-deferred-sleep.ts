@@ -8,7 +8,15 @@ import {
 } from '../../../../../shared/agent-session-resume'
 import { parsePaneKey } from '../../../../../shared/stable-pane-id'
 import { stablePaneHasLivePty } from '@/lib/sleeping-agent-pane-ownership'
-import { clearPaneSpawnDeferral, setPaneSpawnDeferral } from '@/lib/pane-spawn-deferral-registry'
+import {
+  clearPaneSpawnDeferral,
+  getPaneSpawnDeferral,
+  setPaneSpawnDeferral
+} from '@/lib/pane-spawn-deferral-registry'
+import {
+  canResumeHostAutomaticRestores,
+  resumeHostAutomaticRestores
+} from '@/runtime/resume-host-automatic-restores'
 import type { ConnectPanePtySession } from './connect-pane-pty-session'
 import type {
   ColdRestoreAgentResumeStartup,
@@ -82,6 +90,30 @@ function providerSessionLiveInAnotherPane(resume: SleepingAgentSessionRecord): b
   })
 }
 
+/** Adds "Resume automatic restores" once the pane's host proves it can clear the pause. */
+function offerHostResume(
+  session: ConnectPanePtySession,
+  deferral: { reason: SpawnDeferralReason; resume: () => void }
+): void {
+  const environmentId: string | null = session.runtimeEnvironmentId ?? null
+  void canResumeHostAutomaticRestores(environmentId).then((supported) => {
+    if (!supported || getPaneSpawnDeferral(session.cacheKey)?.resume !== deferral.resume) {
+      return
+    }
+    setPaneSpawnDeferral(session.cacheKey, {
+      ...deferral,
+      resumeAutomaticRestores: () => {
+        void resumeHostAutomaticRestores(environmentId).then(
+          () => deferral.resume(),
+          (error: unknown) => {
+            console.warn('[terminal] could not resume automatic restores', error)
+          }
+        )
+      }
+    })
+  })
+}
+
 /** A restore the host kept asleep: the pane shows a sleeping overlay and retries when opened. */
 export function installSpawnDeferredSleep(session: ConnectPanePtySession): void {
   // Set by the transport for the spawn in flight; read when that spawn settles without a PTY.
@@ -100,10 +132,11 @@ export function installSpawnDeferredSleep(session: ConnectPanePtySession): void 
       useAppStore.getState().rememberSleepingAgentSession(record)
     }
     session.deferredSpawn = { startupOverride, options }
-    setPaneSpawnDeferral(session.cacheKey, {
-      reason,
-      resume: () => void session.resumeDeferredSpawn()
-    })
+    const deferral = { reason, resume: () => void session.resumeDeferredSpawn() }
+    setPaneSpawnDeferral(session.cacheKey, deferral)
+    if (reason === 'paused') {
+      offerHostResume(session, deferral)
+    }
     if (!visibleAtSpawn) {
       // Why: a pane opened while its hidden restore was in flight resumes as the user's own.
       queueMicrotask(() => session.resumeDeferredSpawnOnReveal())

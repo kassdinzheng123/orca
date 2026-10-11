@@ -4,6 +4,8 @@ import type { SpawnDeferralReason } from '../../../shared/host-spawn-admission'
 export type PaneSpawnDeferral = {
   reason: SpawnDeferralReason
   resume: () => void
+  /** Offered only for a pause on a host that can clear it. */
+  resumeAutomaticRestores?: () => void
 }
 
 // Why module state: the pane session is imperative and outlives renders; overlays only read it.
