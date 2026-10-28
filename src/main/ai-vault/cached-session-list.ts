@@ -184,6 +184,10 @@ export async function getAiVaultWslHomeDirs(): Promise<string[]> {
   return listRunningWslHomeDirsAsync()
 }
 
+export function aiVaultSessionListCacheGeneration(): number {
+  return cacheGeneration
+}
+
 // Invalidate cached results and disarm in-flight cache writes after deletion.
 export function invalidateAiVaultSessionListCache(): void {
   cacheGeneration++
